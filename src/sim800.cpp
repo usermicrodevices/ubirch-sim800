@@ -1,42 +1,9 @@
-/**
- * UbirchSIM800 is a class interfaces with the SIM800 chip to
- * provide functionality for uploading and downloading data via
- * the mobile phone network.
- *
- * @author Matthias L. Jugel
- *
- * Copyright 2015 ubirch GmbH (http://www.ubirch.com)
- *
- * == LICENSE ==
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include <Arduino.h>
-#include "UbirchSIM800.h"
+#include "sim800.h"
 
-#if defined(TEENSYDUINO)
 #define sscanf_P(i, p, ...)    sscanf((i), (p), __VA_ARGS__)
-#define Serial      Serial1
-#endif
+// #define Serial logger
 #define println_param(prefix, p) print(F(prefix)); print(F(",\"")); print(p); println(F("\""));
-
-// debug AT i/o (very verbose)
-//#define DEBUG_AT
-#define DEBUG_URC
-// debug receiving and sending of packets (sizes)
-//#define DEBUG_PACKETS
-// debugging of send/receive progress (not very verbose)
-#define DEBUG_PROGRESS
 
 #ifndef NDEBUG
 #   define PRINT(s) Serial.print(F(s))
@@ -54,70 +21,59 @@
 #   define DEBUGQLN(...)
 #endif
 
-UbirchSIM800::UbirchSIM800() {
+sim800::sim800(){}
+
+void sim800::begin()
+{
+	_serial.begin(_serialSpeed, SERIAL_8N1, SIM800_RX, SIM800_TX);
+#if NDEBUG
+	printf("\n_serial.begin(%d, %d, %d, %d)\n", _serialSpeed, SERIAL_8N1, SIM800_RX, SIM800_TX);
+#endif
+#if LOG_TO_FILE
+logger.print("\n_serial.begin(");logger.print(_serialSpeed);logger.print(SERIAL_8N1);logger.print(SIM800_RX);logger.print(SIM800_TX);
+#endif
 }
 
-bool UbirchSIM800::reset(bool fona) {
-  return reset(_serialSpeed, fona);
-}
-
-bool UbirchSIM800::reset(uint32_t serialSpeed, bool fona) {
-  _serial.begin(serialSpeed);
-
-  pinMode(SIM800_RST, OUTPUT);
-  digitalWrite(SIM800_RST, HIGH);
-  delay(10);
-  digitalWrite(SIM800_RST, LOW);
-  delay(100);
-  digitalWrite(SIM800_RST, HIGH);
-
-  delay(7000);
-
-  // RST high keeps the chip in reset without a diode, so put to low
-  if (!fona) digitalWrite(SIM800_RST, LOW);
-
-  while (_serial.available()) _serial.read();
-
-  expect_AT_OK(F(""));
-  expect_AT_OK(F(""));
-  expect_AT_OK(F(""));
-  bool ok = expect_AT_OK(F("E0"));
-
-  expect_AT_OK(F("+IFC=0,0")); // No hardware flow control
-  expect_AT_OK(F("+CIURC=0")); // No "Call Ready"
-
-  while (_serial.available()) _serial.read();
-
+bool sim800::reset() {
+	bool ok = expect_AT_OK(F("+CFUN=1,1"));
+	vTaskDelay(5000 / portTICK_RATE_MS);
+	ok = expect_AT_OK(F(""));if(!ok)expect_AT_OK(F(""));
+	println(F("ATZ"));
+	vTaskDelay(1000 / portTICK_RATE_MS);
+	ok = expect_OK(5000);
+	println(F("ATE0"));
+	vTaskDelay(1000 / portTICK_RATE_MS);
+	ok = expect_OK(5000);if(!ok){println(F("ATE0"));vTaskDelay(1000 / portTICK_RATE_MS);ok = expect_OK(5000);}
+	ok = expect_AT_OK(F("+CFUN=1"));if(!ok)expect_AT_OK(F("+CFUN=1"));
   return ok;
 }
 
-void UbirchSIM800::setAPN(const __FlashStringHelper *apn, const __FlashStringHelper *user,
+void sim800::setAPN(const __FlashStringHelper *apn, const __FlashStringHelper *user,
                           const __FlashStringHelper *pass) {
   _apn = apn;
   _user = user;
   _pass = pass;
 }
 
-bool UbirchSIM800::unlock(const __FlashStringHelper *pin) {
-  print(F("+CPIN="));
+bool sim800::unlock(const __FlashStringHelper *pin) {
+  print(F("AT+CPIN="));
   println(pin);
   return expect_OK();
 }
 
-
-bool UbirchSIM800::time(char *date, char *time, char *tz) {
+bool sim800::time(char *date, char *time, char *tz) {
   println(F("AT+CCLK?"));
 
-  return expect_scan(F("+CCLK: \"%8s,%8s%3s\""), date, time, tz) == 3;
+  return expect_scan(F("+CCLK: \"%8s,%8s%3s\""), date, time, tz);
 }
 
-bool UbirchSIM800::IMEI(char *imei) {
+bool sim800::IMEI(char *imei) {
   println(F("AT+GSN"));
   expect_scan(F("%s"), imei);
   return expect_OK();
 }
 
-bool UbirchSIM800::battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t &bat_voltage) {
+bool sim800::battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t &bat_voltage) {
   println(F("AT+CBC"));
   if(!expect_scan(F("+CBC: %d,%d,%d"), &bat_status, &bat_percent, &bat_voltage)) {
     Serial.println(F("BAT status lookup failed"));
@@ -125,7 +81,7 @@ bool UbirchSIM800::battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t
   return expect_OK();
 }
 
-bool UbirchSIM800::location(char *&lat, char *&lon, char *&date, char *&time) {
+bool sim800::location(char *&lat, char *&lon, char *&date, char *&time) {
   uint16_t loc_status;
   char reply[64];
   println(F("AT+CIPGSMLOC=1,1"));
@@ -140,56 +96,66 @@ bool UbirchSIM800::location(char *&lat, char *&lon, char *&date, char *&time) {
   return expect_OK() && loc_status == 0 && lat && lon;
 }
 
-bool UbirchSIM800::wakeup() {
+bool sim800::wakeup() {
+#ifdef DEBUG_AT
   PRINTLN("!!! SIM800 wakeup");
-
+#endif
   expect_AT_OK(F(""));
-  // check if the chip is already awake, otherwise start wakeup
   if (!expect_AT_OK(F(""), 5000)) {
+#ifdef DEBUG_AT
     PRINTLN("!!! SIM800 using PWRKEY wakeup procedure");
+#endif
     pinMode(SIM800_KEY, OUTPUT);
     pinMode(SIM800_PS, INPUT);
     do {
-      digitalWrite(SIM800_KEY, HIGH);
-      delay(10);
       digitalWrite(SIM800_KEY, LOW);
-      delay(1100);
+      vTaskDelay(1100 / portTICK_RATE_MS);
       digitalWrite(SIM800_KEY, HIGH);
-      delay(2000);
+      vTaskDelay(3000 / portTICK_RATE_MS);
     } while (digitalRead(SIM800_PS) == LOW);
-    // make pin unused (do not leak)
     pinMode(SIM800_KEY, INPUT_PULLUP);
+#ifdef DEBUG_AT
     PRINTLN("!!! SIM800 ok");
+#endif
   } else {
+#ifdef DEBUG_AT
     PRINTLN("!!! SIM800 already awake");
+#endif
   }
 
   return reset();
 }
 
-bool UbirchSIM800::shutdown() {
+bool sim800::shutdown() {
+#ifdef DEBUG_AT
   PRINTLN("!!! SIM800 shutdown");
+#endif
 
-  disableGPRS();
-  expect_AT_OK(F("+CPOWD=1"));
-  expect(F("NORMAL POWER DOWN"), 5000);
-
-  if (urc_status != 12 && digitalRead(SIM800_PS) == HIGH) {
+  bool reboot = expect_AT_OK(F("+CFUN=1,1"));
+	if(reboot) vTaskDelay(5000 / portTICK_RATE_MS);
+	else
+	{
+  if (digitalRead(SIM800_PS) == HIGH) {
+#ifdef DEBUG_AT
     PRINTLN("!!! SIM800 shutdown using PWRKEY");
+#endif
     pinMode(SIM800_KEY, OUTPUT);
-    pinMode(SIM800_PS, INPUT);
+	  digitalWrite(SIM800_KEY, HIGH);
+    vTaskDelay(10 / portTICK_RATE_MS);
     digitalWrite(SIM800_KEY, LOW);
-    for (uint8_t s = 30; s > 0 && digitalRead(SIM800_PS) != LOW; --s) delay(1000);
-    digitalWrite(SIM800_KEY, HIGH);
-    pinMode(SIM800_KEY, INPUT);
     pinMode(SIM800_KEY, INPUT_PULLUP);
   }
+  }
+#ifdef DEBUG_AT
   PRINTLN("!!! SIM800 shutdown ok");
+#endif
   return true;
 }
 
-bool UbirchSIM800::registerNetwork(uint16_t timeout) {
+bool sim800::registerNetwork(uint16_t timeout) {
+#ifdef DEBUG_AT
   PRINTLN("!!! SIM800 waiting for network registration");
+#endif
   expect_AT_OK(F(""));
   while (timeout -= 1000) {
     unsigned short int n = 0;
@@ -226,12 +192,12 @@ bool UbirchSIM800::registerNetwork(uint16_t timeout) {
 #endif
       return true;
     }
-    delay(1000);
+    vTaskDelay(1000 / portTICK_RATE_MS);
   }
   return false;
 }
 
-bool UbirchSIM800::enableGPRS(uint16_t timeout) {
+bool sim800::enableGPRS(uint16_t timeout) {
   expect_AT(F("+CIPSHUT"), F("SHUT OK"), 5000);
   expect_AT_OK(F("+CIPMUX=1")); // enable multiplex mode
   expect_AT_OK(F("+CIPRXGET=1")); // we will receive manually
@@ -239,7 +205,7 @@ bool UbirchSIM800::enableGPRS(uint16_t timeout) {
   bool attached = false;
   while (!attached && timeout > 0) {
     attached = expect_AT_OK(F("+CGATT=1"), 10000);
-    delay(1000);
+    vTaskDelay(1000 / portTICK_RATE_MS);
     timeout -= 1000;
   }
   if (!attached) return false;
@@ -273,27 +239,26 @@ bool UbirchSIM800::enableGPRS(uint16_t timeout) {
   do {
     println(F("AT+CGATT?"));
     attached = expect(F("+CGATT: 1"));
-    delay(1);
+    vTaskDelay(1000 / portTICK_RATE_MS);
   } while (--timeout && !attached);
 
   return attached;
 }
 
-bool UbirchSIM800::disableGPRS() {
+bool sim800::disableGPRS() {
   expect_AT(F("+CIPSHUT"), F("SHUT OK"));
   if (!expect_AT_OK(F("+SAPBR=0,1"), 30000)) return false;
 
   return expect_AT_OK(F("+CGATT=0"));
 }
 
-unsigned short int UbirchSIM800::HTTP_get(const char *url, unsigned long int &length) {
+unsigned short int sim800::HTTP_get(const char *url, unsigned long int *length)
+{
   expect_AT_OK(F("+HTTPTERM"));
-  delay(100);
+  vTaskDelay(100 / portTICK_RATE_MS);
 
   if (!expect_AT_OK(F("+HTTPINIT"))) return 1000;
   if (!expect_AT_OK(F("+HTTPPARA=\"CID\",1"))) return 1101;
-  if (!expect_AT_OK(F("+HTTPPARA=\"UA\",\"UBIRCH#1 r0.1\""))) return 1102;
-  if (!expect_AT_OK(F("+HTTPPARA=\"REDIR\",1"))) return 1103;
   println_param("AT+HTTPPARA=\"URL\"", url);
   if (!expect_OK()) return 1110;
 
@@ -305,13 +270,9 @@ unsigned short int UbirchSIM800::HTTP_get(const char *url, unsigned long int &le
   return status;
 }
 
-unsigned short int UbirchSIM800::HTTP_get(const char *url, unsigned long int &length, STREAM &file) {
+unsigned short int sim800::HTTP_get(const char *url, unsigned long int *length, STREAM &file)
+{
   unsigned short int status = HTTP_get(url, length);
-  PRINT("HTTP STATUS: ");
-  DEBUGLN(status);
-  PRINT("FILE LENGTH: ");
-  DEBUGLN(length);
-
   if (length == 0) return status;
 
   char *buffer = (char *) malloc(SIM800_BUFSIZE);
@@ -326,42 +287,71 @@ unsigned short int UbirchSIM800::HTTP_get(const char *url, unsigned long int &le
 #endif
     pos += r;
     file.write(buffer, r);
-  } while (pos < length);
+  } while (pos < *length);
   free(buffer);
-  PRINTLN("");
+  // PRINTLN("");
 
   return status;
 }
 
-size_t UbirchSIM800::HTTP_read(char *buffer, uint32_t start, size_t length) {
-  print(F("AT+HTTPREAD="));
-  print(start);
-  print(F(","));
-  println((uint32_t) length);
-
-  unsigned long int available;
-  expect_scan(F("+HTTPREAD: %lu"), &available);
+size_t sim800::HTTP_read(char *buffer, uint32_t start, size_t length)
+{
+	println(F("AT+HTTPREAD"));
+	unsigned long int available;
+	expect_scan(F("+HTTPREAD: %lu"), &available);
 #ifdef DEBUG_PACKETS
-  PRINT("~~~ PACKET: ");
-  DEBUGLN(available);
+	PRINT("~~~ PACKET: ");
+	DEBUGLN(available);
 #endif
-  size_t idx = read(buffer, (size_t) available);
-  if (!expect_OK()) return 0;
+	if(available > CRITICAL_BUFFER_HTTPREAD)
+	{
+		PRINT("~~~ BUFFER_HTTPREAD: ");DEBUGLN(available);
+		return -1;//2148341393
+	}
+	size_t idx = 0;
+	if(available <= length) idx = read(buffer, (size_t) available);
+	else idx = read(buffer, length);
+	if (!expect_OK()) return 0;
 #ifdef DEBUG_PACKETS
-  PRINT("~~~ DONE: ");
-  DEBUGLN(idx);
+	PRINT("~~~ DONE: ");
+	DEBUGLN(idx);
 #endif
-  return idx;
+	return idx;
 }
 
-unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &length) {
+size_t sim800::HTTP_read_ota(esp_ota_handle_t ota_handle, uint32_t start, size_t length)
+{
+	println(F("AT+HTTPREAD"));
+	unsigned long int available;
+	expect_scan(F("+HTTPREAD: %lu"), &available);
+#ifdef DEBUG_PACKETS
+	PRINT("~~~ OTA PACKET: ");
+	DEBUGLN(available);
+#endif
+	if(available > CRITICAL_BUFFER_HTTPREAD)
+	{
+		PRINT("~~~ OTA BUFFER_HTTPREAD: ");DEBUGLN(available);
+		return -1;//2148341393
+	}
+	size_t idx = 0;
+	if(available <= length) idx = read_ota(ota_handle, (size_t)available);
+	else idx = read_ota(ota_handle, length);
+	if (!expect_OK()) return 0;
+#ifdef DEBUG_PACKETS
+	PRINT("~~~ OTA DONE: ");
+	DEBUGLN(idx);
+#endif
+	return idx;
+}
+
+unsigned short int sim800::HTTP_post(const char *url, unsigned long int *length)
+{
+  length = 0;
   expect_AT_OK(F("+HTTPTERM"));
-  delay(100);
+  vTaskDelay(100 / portTICK_RATE_MS);
 
   if (!expect_AT_OK(F("+HTTPINIT"))) return 1000;
   if (!expect_AT_OK(F("+HTTPPARA=\"CID\",1"))) return 1101;
-  if (!expect_AT_OK(F("+HTTPPARA=\"UA\",\"UBIRCH#1\""))) return 1102;
-  if (!expect_AT_OK(F("+HTTPPARA=\"REDIR\",1"))) return 1103;
   println_param("AT+HTTPPARA=\"URL\"", url);
   if (!expect_OK()) return 1110;
 
@@ -373,23 +363,23 @@ unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &l
   return status;
 }
 
-unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &length, char *buffer, uint32_t size) {
+unsigned short int sim800::HTTP_post(const char *url, unsigned long int *length, char *buffer, uint32_t size)
+{
   expect_AT_OK(F("+HTTPTERM"));
-  delay(100);
+  vTaskDelay(100 / portTICK_RATE_MS);
 
   length = 0;
 
   if (!expect_AT_OK(F("+HTTPINIT"))) return 1000;
   if (!expect_AT_OK(F("+HTTPPARA=\"CID\",1"))) return 1101;
-  if (!expect_AT_OK(F("+HTTPPARA=\"UA\",\"UBIRCH#1\""))) return 1102;
-  if (!expect_AT_OK(F("+HTTPPARA=\"REDIR\",1"))) return 1103;
+  if (!expect_AT_OK(F("+HTTPPARA=\"CONTENT\",\"application/x-www-form-urlencoded\""))) return 1102;
   println_param("AT+HTTPPARA=\"URL\"", url);
   if (!expect_OK()) return 1110;
 
   print(F("AT+HTTPDATA="));
   print(size);
   print(F(","));
-  println((uint32_t) 120000);
+  println((uint32_t) 3000);
 
   if (!expect(F("DOWNLOAD"))) return 0;
 #ifdef DEBUG_PACKETS
@@ -397,13 +387,12 @@ unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &l
   DEBUG(buffer);
   PRINTLN("'");
 #endif
-  _serial.write(buffer, size);
+  _serial.write((const uint8_t*)buffer, size);
 
   if (!expect_OK(5000)) return 1005;
 
   if (!expect_AT_OK(F("+HTTPACTION=1"))) return 1004;
 
-  // wait for the action to be completed, give it 5s for each try
   uint16_t status;
   while (!expect_scan(F("+HTTPACTION: 1,%hu,%lu"), &status, &length, 5000));
 
@@ -411,14 +400,12 @@ unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &l
 }
 
 
-unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &length, STREAM &file, uint32_t size) {
+unsigned short int sim800::HTTP_post(const char *url, unsigned long int &length, STREAM &file, uint32_t size) {
   expect_AT_OK(F("+HTTPTERM"));
-  delay(100);
+  vTaskDelay(100 / portTICK_RATE_MS);
 
   if (!expect_AT_OK(F("+HTTPINIT"))) return 1000;
   if (!expect_AT_OK(F("+HTTPPARA=\"CID\",1"))) return 1101;
-  if (!expect_AT_OK(F("+HTTPPARA=\"UA\",\"UBIRCH#1\""))) return 1102;
-  if (!expect_AT_OK(F("+HTTPPARA=\"REDIR\",1"))) return 1103;
   println_param("AT+HTTPPARA=\"URL\"", url);
   if (!expect_OK()) return 1110;
 
@@ -461,14 +448,13 @@ unsigned short int UbirchSIM800::HTTP_post(const char *url, unsigned long int &l
 
   if (!expect_AT_OK(F("+HTTPACTION=1"))) return 1004;
 
-  // wait for the action to be completed, give it 5s for each try
   uint16_t status;
   while (!expect_scan(F("+HTTPACTION: 1,%hu,%lu"), &status, &length, 5000));
 
   return status;
 }
 
-inline size_t UbirchSIM800::read(char *buffer, size_t length) {
+inline size_t sim800::read(char *buffer, size_t length) {
   uint32_t idx = 0;
   while (length) {
     while (length && _serial.available()) {
@@ -479,7 +465,38 @@ inline size_t UbirchSIM800::read(char *buffer, size_t length) {
   return idx;
 }
 
-bool UbirchSIM800::connect(const char *address, unsigned short int port, uint16_t timeout) {
+inline size_t sim800::read_ota(size_t length, esp_ota_handle_t ota_handle)
+{
+	esp_err_t err = -1;
+	size_t idx = 0, i = 0;
+	char* buffer = (char*)malloc(OTA_BUFFSIZE);
+	if(buffer)
+	{
+		memset(buffer, 0, OTA_BUFFSIZE);
+		while(length)
+		{
+			while(length && _serial.available())
+			{
+				buffer[i++] = (char) _serial.read();
+				idx++;
+				length--;
+				if(i == OTA_BUFFSIZE)
+				{
+					i = 0;
+					err = esp_ota_write(ota_handle, (const void *)buffer, OTA_BUFFSIZE);
+					memset(buffer, 0, OTA_BUFFSIZE);
+					// ESP_ERROR_CHECK( err );
+					if(err != ESP_OK) break;
+				}
+			}
+			 if(err != ESP_OK){idx = 0; break;}
+		}
+		free(buffer);
+	}
+	return idx;
+}
+
+bool sim800::connect(const char *address, unsigned short int port, uint16_t timeout) {
   if (!expect_AT(F("+CIPSHUT"), F("SHUT OK"))) return false;
   if (!expect_AT_OK(F("+CMEE=2"))) return false;
   if (!expect_AT_OK(F("+CIPQSEND=1"))) return false;
@@ -499,7 +516,7 @@ bool UbirchSIM800::connect(const char *address, unsigned short int port, uint16_
     println(F("AT+CIFSR"));
     expect_scan(F("%s"), ipaddress);
     connected = strcmp_P(ipaddress, PSTR("ERROR")) != 0;
-    if (!connected) delay(1);
+    if (!connected) vTaskDelay(1 / portTICK_RATE_MS);
   } while (timeout-- && !connected);
 
   if (!connected) return false;
@@ -515,7 +532,7 @@ bool UbirchSIM800::connect(const char *address, unsigned short int port, uint16_
   return connected;
 }
 
-bool UbirchSIM800::status() {
+bool sim800::status() {
   println(F("AT+CIPSTATUS=0"));
 
   char status[SIM800_BUFSIZE];
@@ -526,11 +543,11 @@ bool UbirchSIM800::status() {
   return strcmp_P(status, PSTR("CONNECTED")) < 0;
 }
 
-bool UbirchSIM800::disconnect() {
+bool sim800::disconnect() {
   return expect_AT_OK(F("+CIPCLOSE=0"));
 };
 
-bool UbirchSIM800::send(char *buffer, size_t size, unsigned long int &accepted) {
+bool sim800::send(char *buffer, size_t size, unsigned long int &accepted) {
   print(F("AT+CIPSEND=0,"));
   println((uint32_t) size);
 
@@ -547,7 +564,7 @@ bool UbirchSIM800::send(char *buffer, size_t size, unsigned long int &accepted) 
   return accepted == size;
 }
 
-size_t UbirchSIM800::receive(char *buffer, size_t size) {
+size_t sim800::receive(char *buffer, size_t size) {
   size_t actual = 0;
   while (actual < size) {
     uint8_t chunk = (uint8_t) min(size - actual, 128);
@@ -569,7 +586,7 @@ size_t UbirchSIM800::receive(char *buffer, size_t size) {
  */
 
 // read a line
-size_t UbirchSIM800::readline(char *buffer, size_t max, uint16_t timeout) {
+size_t sim800::readline(char *buffer, size_t max, uint16_t timeout) {
   uint16_t idx = 0;
   while (--timeout) {
     while (_serial.available()) {
@@ -584,110 +601,91 @@ size_t UbirchSIM800::readline(char *buffer, size_t max, uint16_t timeout) {
     }
 
     if (timeout == 0) break;
-    delay(1);
+    vTaskDelay(1 / portTICK_RATE_MS);
   }
   buffer[idx] = 0;
   return idx;
 };
 
-void UbirchSIM800::eat_echo() {
+void sim800::eat_echo() {
   while (_serial.available()) {
     _serial.read();
     // don't be too quick or we might not have anything available
     // when there actually is...
-    delay(1);
+    vTaskDelay(1 / portTICK_RATE_MS);
   }
 }
 
-void UbirchSIM800::print(const __FlashStringHelper *s) {
+void sim800::print(const __FlashStringHelper *s) {
 #ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGQLN(s);
+PRINT("+++ ");
+DEBUGQLN(s);
 #endif
-  _serial.print(s);
+	_serial.print(s);
 }
 
-void UbirchSIM800::print(uint32_t s) {
+void sim800::print(uint32_t s) {
 #ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGLN(s);
+PRINT("+++ ");
+DEBUGLN(s);
 #endif
-  _serial.print(s);
+	_serial.print(s);
 }
 
 
-void UbirchSIM800::println(const __FlashStringHelper *s) {
+void sim800::println(const __FlashStringHelper *s) {
 #ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGQLN(s);
+PRINT("+++ ");
+DEBUGQLN(s);
 #endif
-  _serial.print(s);
-  eat_echo();
-  _serial.println();
+	_serial.print(s);
+	eat_echo();
+	_serial.println();
 }
 
-void UbirchSIM800::println(uint32_t s) {
+void sim800::println(uint32_t s) {
 #ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGLN(s);
+PRINT("+++ ");
+DEBUGLN(s);
 #endif
-  _serial.print(s);
-  eat_echo();
-  _serial.println();
+	_serial.print(s);
+	eat_echo();
+	_serial.println();
 }
 
-#ifdef __AVR__
-
-void UbirchSIM800::println(const char *s) {
-#ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGQLN(s);
-#endif
-  _serial.print(s);
-  eat_echo();
-  _serial.println();
+bool sim800::expect_AT(const __FlashStringHelper *cmd, const __FlashStringHelper *expected, uint16_t timeout) {
+	print(F("AT"));
+	println(cmd);
+	vTaskDelay(10 / portTICK_RATE_MS);
+	return expect(expected, timeout);
 }
 
-void UbirchSIM800::print(const char *s) {
-#ifdef DEBUG_AT
-  PRINT("+++ ");
-  DEBUGQLN(s);
-#endif
-  _serial.print(s);
-}
-#endif
-
-bool UbirchSIM800::expect_AT(const __FlashStringHelper *cmd, const __FlashStringHelper *expected, uint16_t timeout) {
-  print(F("AT"));
-  println(cmd);
-  return expect(expected, timeout);
-}
-
-bool UbirchSIM800::expect_AT_OK(const __FlashStringHelper *cmd, uint16_t timeout) {
+bool sim800::expect_AT_OK(const __FlashStringHelper *cmd, uint16_t timeout) {
   return expect_AT(cmd, F("OK"), timeout);
 }
 
-bool UbirchSIM800::expect(const __FlashStringHelper *expected, uint16_t timeout) {
+bool sim800::expect(const __FlashStringHelper *expected, uint16_t timeout) {
   char buf[SIM800_BUFSIZE];
-  size_t len;
-  do len = readline(buf, SIM800_BUFSIZE, timeout); while (is_urc(buf, len));
+  size_t len, i=0;
+  do{len = readline(buf, SIM800_BUFSIZE, timeout); i++; if(i>5)break;}while (is_urc(buf, len));
 #ifdef DEBUG_AT
   PRINT("--- (");
   DEBUG(len);
   PRINT(") ");
   DEBUGQLN(buf);
 #endif
+  _serial.flush();
   return strcmp_P(buf, (const char PROGMEM *) expected) == 0;
 }
 
-bool UbirchSIM800::expect_OK(uint16_t timeout) {
+bool sim800::expect_OK(uint16_t timeout) {
   return expect(F("OK"), timeout);
 }
 
-bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, uint16_t timeout) {
+bool sim800::expect_scan(const __FlashStringHelper *pattern, void *ref, uint16_t timeout) {
   char buf[SIM800_BUFSIZE];
-  size_t len;
-  do len = readline(buf, SIM800_BUFSIZE, timeout); while (is_urc(buf, len));
+  size_t len, i=0;
+  do{len = readline(buf, SIM800_BUFSIZE, timeout); i++; if(i>5)break;}while (is_urc(buf, len));
 #ifdef DEBUG_AT
   PRINT("--- (");
   DEBUG(len);
@@ -697,10 +695,11 @@ bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, ui
   return sscanf_P(buf, (const char PROGMEM *) pattern, ref) == 1;
 }
 
-bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, uint16_t timeout) {
+bool sim800::expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, uint16_t timeout)
+{
   char buf[SIM800_BUFSIZE];
-  size_t len;
-  do len = readline(buf, SIM800_BUFSIZE, timeout); while (is_urc(buf, len));
+  size_t len, i=0;
+  do{len = readline(buf, SIM800_BUFSIZE, timeout); i++; if(i>5)break;}while (is_urc(buf, len));
 #ifdef DEBUG_AT
   PRINT("--- (");
   DEBUG(len);
@@ -710,11 +709,11 @@ bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, vo
   return sscanf_P(buf, (const char PROGMEM *) pattern, ref, ref1) == 2;
 }
 
-bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, void *ref2,
-                               uint16_t timeout) {
+bool sim800::expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, void *ref2, uint16_t timeout)
+{
   char buf[SIM800_BUFSIZE];
-  size_t len;
-  do len = readline(buf, SIM800_BUFSIZE, timeout); while (is_urc(buf, len));
+  size_t len, i=0;
+  do{len = readline(buf, SIM800_BUFSIZE, timeout); i++; if(i>5)break;}while (is_urc(buf, len));
 #ifdef DEBUG_AT
   PRINT("--- (");
   DEBUG(len);
@@ -724,7 +723,7 @@ bool UbirchSIM800::expect_scan(const __FlashStringHelper *pattern, void *ref, vo
   return sscanf_P(buf, (const char PROGMEM *) pattern, ref, ref1, ref2) == 3;
 }
 
-bool UbirchSIM800::is_urc(const char *line, size_t len) {
+bool sim800::is_urc(const char *line, size_t len) {
   urc_status = 0xff;
 
   for (uint8_t i = 0; i < 17; i++) {
@@ -749,4 +748,147 @@ bool UbirchSIM800::is_urc(const char *line, size_t len) {
   return false;
 }
 
+bool sim800::check_sim_card()
+{
+	#ifdef DEBUG_URC
+		PRINTLN("!!! SIM800 check SIM card inserted...");
+	#endif
+	println(F("AT+CSMINS?"));
+	return expect(F("+CSMINS: 0,1"), 3000);
+	// println(F("AT+CPIN?"));
+	// return expect(F("CPIN: READY"), 3000);
+}
 
+int sim800::get_signal()
+{
+	int val = 0;
+	println("AT+CSQ");
+	vTaskDelay(3000 / portTICK_RATE_MS);
+	expect_scan(F("+CSQ: %2d"), (void*)&val);
+	#ifdef DEBUG_URC
+		PRINT("!!! SIM800 SIGNAL QUALITY ");
+		DEBUG(val);
+		PRINTLN(" dBm");
+	#endif
+	return val;
+}
+
+
+void sim800::set_operator()
+{
+	int operator_index = -1;
+	char* operator_name = (char*)malloc(64);
+	if(operator_name)
+	{
+		memset(operator_name, 0, 64);
+		println(F("AT+COPS?"));
+		if(expect_scan(F("%s"), operator_name, 3000))
+		{
+			#if GSM_DEBUG
+			printf("\nGSM: AT RESPONSE: [%s]", operator_name);
+			#endif
+			for(int i = 0; i < 4; ++i)
+			{
+				if(strstr(operator_name, operators[i]))
+				{
+					operator_index = i;
+					break;
+				}
+			}
+		}
+		free(operator_name);
+	}
+	if(operator_index > -1 && operator_index != current_operator)
+	{
+		current_operator = operator_index;
+		setAPN(apns[current_operator], users[current_operator], pwds[current_operator]);
+	}
+}
+
+void sim800::update_esp()
+{
+	unsigned long int len = 0;
+	// String url = String(WEB_URL_API) + "/update";//+id_controller
+	String url = String("http://test.ru/api") + "/update";//+id_controller
+	Serial.println("==== START UPDATE ====");
+	Serial.println(url);
+	uint16_t stat = HTTP_get(url.c_str(), &len);
+	vTaskDelay(3000 / portTICK_RATE_MS);
+	Serial.print("UPDATE HTTP status = ");Serial.print(stat);Serial.print("; received length = ");Serial.println(len);
+	if(stat > 200)
+	{
+		stat = HTTP_get(url.c_str(), &len);
+		Serial.print("UPDATE HTTP status = ");Serial.print(stat);Serial.print("; received length = ");Serial.println(len);
+		if(stat > 200)
+			return;
+	}
+	// else if(stat == 37 || stat == 200)
+	else
+	{
+		char* buffer = (char*)malloc(16);
+		if(buffer)
+		{
+			memset(buffer, 0, 16);
+			size_t result_read = HTTP_read(buffer, 0, 16);
+			if(result_read == -1)
+			{
+				free(buffer);
+				return;
+			}
+			Serial.print("UPDATE HTTP read = ");Serial.print(buffer);Serial.print("; received length = ");Serial.println(result_read);
+			if(result_read > 0)
+			{
+				// url = String(WEB_URL_API) + "/upgrade/" + String(buffer);
+				url = String("http://test.ru/") + String(buffer);
+				Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quite for a while.. Patience!");
+				unsigned short int status = HTTP_get(url.c_str(), &len);
+				// if (len > 0)
+				if(status < 201)
+				{
+					esp_err_t err;
+					esp_ota_handle_t update_handle = 0;/* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
+					const esp_partition_t *update_partition = NULL;
+					printf("Starting OTA example...\n");
+					const esp_partition_t *configured = esp_ota_get_boot_partition();
+					const esp_partition_t *running = esp_ota_get_running_partition();
+					if(configured != running)
+					{
+						printf("Configured OTA boot partition at offset 0x%08x, but running from offset 0x%08x\n", configured->address, running->address);
+						printf("(This can happen if either the OTA boot data or preferred boot image become corrupted somehow.)\n");
+					}
+					printf("Running partition type %d subtype %d (offset 0x%08x)\n", running->type, running->subtype, running->address);
+					update_partition = esp_ota_get_next_update_partition(NULL);
+					assert(update_partition != NULL);
+					printf("Writing to partition subtype %d at offset 0x%x\n", update_partition->subtype, update_partition->address);
+					err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
+					if(err != ESP_OK)
+					{
+						printf("esp_ota_begin failed, error=%d\n", err);
+						return;
+					}
+					else
+					{
+						printf("esp_ota_begin succeeded\n");
+						uint32_t buff_len = 0;
+						size_t readed_ota_bytes = HTTP_read_ota(update_handle, buff_len, 512*1024);
+						printf("Total Write binary data length : %d\n", readed_ota_bytes);
+						if(esp_ota_end(update_handle) != ESP_OK)
+							printf("esp_ota_end failed!\n");
+						else
+						{
+							err = esp_ota_set_boot_partition(update_partition);
+							if(err != ESP_OK)
+								printf("esp_ota_set_boot_partition failed! err=0x%x\n", err);
+							else
+							{
+								printf("Prepare to restart system!\n");
+								esp_restart();
+							}
+						}
+					}
+				}
+			}
+			free(buffer);
+		}
+	}
+}
