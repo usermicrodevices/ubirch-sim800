@@ -29,12 +29,10 @@ void sim800::begin()
 #if NDEBUG
 	printf("\n_serial.begin(%d, %d, %d, %d)\n", _serialSpeed, SERIAL_8N1, SIM800_RX, SIM800_TX);
 #endif
-#if LOG_TO_FILE
-logger.print("\n_serial.begin(");logger.print(_serialSpeed);logger.print(SERIAL_8N1);logger.print(SIM800_RX);logger.print(SIM800_TX);
-#endif
 }
 
-bool sim800::reset() {
+bool sim800::reset()
+{
 	bool ok = expect_AT_OK(F("+CFUN=1,1"));
 	vTaskDelay(5000 / portTICK_RATE_MS);
 	ok = expect_AT_OK(F(""));if(!ok)expect_AT_OK(F(""));
@@ -45,32 +43,41 @@ bool sim800::reset() {
 	vTaskDelay(1000 / portTICK_RATE_MS);
 	ok = expect_OK(5000);if(!ok){println(F("ATE0"));vTaskDelay(1000 / portTICK_RATE_MS);ok = expect_OK(5000);}
 	ok = expect_AT_OK(F("+CFUN=1"));if(!ok)expect_AT_OK(F("+CFUN=1"));
-  return ok;
+	return ok;
 }
 
-void sim800::setAPN(const __FlashStringHelper *apn, const __FlashStringHelper *user,
-                          const __FlashStringHelper *pass) {
-  _apn = apn;
-  _user = user;
-  _pass = pass;
+void sim800::setAPN(const __FlashStringHelper *apn, const __FlashStringHelper *user, const __FlashStringHelper *pass)
+{
+	_apn = apn;
+	_user = user;
+	_pass = pass;
 }
 
-bool sim800::unlock(const __FlashStringHelper *pin) {
-  print(F("AT+CPIN="));
-  println(pin);
-  return expect_OK();
+bool sim800::unlock(const __FlashStringHelper *pin)
+{
+	print(F("AT+CPIN="));
+	println(pin);
+	return expect_OK();
 }
 
-bool sim800::time(char *date, char *time, char *tz) {
-  println(F("AT+CCLK?"));
-
-  return expect_scan(F("+CCLK: \"%8s,%8s%3s\""), date, time, tz);
+bool sim800::time(char *date, char *time, char *tz)
+{
+	println(F("AT+CCLK?"));
+	return expect_scan(F("+CCLK: \"%8s,%8s%3s\""), date, time, tz);
 }
 
-bool sim800::IMEI(char *imei) {
-  println(F("AT+GSN"));
-  expect_scan(F("%s"), imei);
-  return expect_OK();
+bool sim800::IMEI(char *imei)
+{
+	println(F("AT+GSN"));
+	expect_scan(F("%s"), imei);
+	return expect_OK();
+}
+
+bool sim800::CIMI(char *cimi)//ID sim card
+{
+	println(F("AT+CIMI"));
+	expect_scan(F("%s"), cimi);
+	return expect_OK();
 }
 
 bool sim800::battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t &bat_voltage) {
@@ -81,19 +88,23 @@ bool sim800::battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t &bat_
   return expect_OK();
 }
 
-bool sim800::location(char *&lat, char *&lon, char *&date, char *&time) {
-  uint16_t loc_status;
-  char reply[64];
-  println(F("AT+CIPGSMLOC=1,1"));
-  if (!expect_scan(F("+CIPGSMLOC: %d,%s"), &loc_status, reply, 60000)) {
-    Serial.println(F("GPS lookup failed"));
-  } else {
-    lon = strdup(strtok(reply, ","));
-    lat = strdup(strtok(NULL, ","));
-    date = strdup(strtok(NULL, ","));
-    time = strdup(strtok(NULL, ","));
-  }
-  return expect_OK() && loc_status == 0 && lat && lon;
+bool sim800::location(char *&lat, char *&lon, char *&date, char *&time)
+{
+	uint16_t loc_status;
+	char reply[64];
+	println(F("AT+CIPGSMLOC=1,1"));
+	vTaskDelay(3000 / portTICK_RATE_MS);
+	if (!expect_scan(F("+CIPGSMLOC: %d,%s"), &loc_status, reply, 10000)) {
+		#ifdef DEBUG_AT
+		Serial.println(F("GPS lookup failed"));
+		#endif
+	} else {
+		lon = strdup(strtok(reply, ","));
+		lat = strdup(strtok(NULL, ","));
+		date = strdup(strtok(NULL, ","));
+		time = strdup(strtok(NULL, ","));
+	}
+	return expect_OK() && loc_status == 0 && lat && lon;
 }
 
 bool sim800::wakeup() {
@@ -273,6 +284,7 @@ unsigned short int sim800::HTTP_get(const char *url, unsigned long int *length)
 unsigned short int sim800::HTTP_get(const char *url, unsigned long int *length, STREAM &file)
 {
   unsigned short int status = HTTP_get(url, length);
+
   if (length == 0) return status;
 
   char *buffer = (char *) malloc(SIM800_BUFSIZE);
@@ -289,8 +301,6 @@ unsigned short int sim800::HTTP_get(const char *url, unsigned long int *length, 
     file.write(buffer, r);
   } while (pos < *length);
   free(buffer);
-  // PRINTLN("");
-
   return status;
 }
 
@@ -393,6 +403,7 @@ unsigned short int sim800::HTTP_post(const char *url, unsigned long int *length,
 
   if (!expect_AT_OK(F("+HTTPACTION=1"))) return 1004;
 
+  // wait for the action to be completed, give it 5s for each try
   uint16_t status;
   while (!expect_scan(F("+HTTPACTION: 1,%hu,%lu"), &status, &length, 5000));
 
@@ -448,6 +459,7 @@ unsigned short int sim800::HTTP_post(const char *url, unsigned long int &length,
 
   if (!expect_AT_OK(F("+HTTPACTION=1"))) return 1004;
 
+  // wait for the action to be completed, give it 5s for each try
   uint16_t status;
   while (!expect_scan(F("+HTTPACTION: 1,%hu,%lu"), &status, &length, 5000));
 
@@ -808,8 +820,7 @@ void sim800::set_operator()
 void sim800::update_esp()
 {
 	unsigned long int len = 0;
-	// String url = String(WEB_URL_API) + "/update";//+id_controller
-	String url = String("http://test.ru/api") + "/update";//+id_controller
+	String url = String(WEB_URL_API) + "/update";//+id_controller
 	Serial.println("==== START UPDATE ====");
 	Serial.println(url);
 	uint16_t stat = HTTP_get(url.c_str(), &len);
@@ -822,7 +833,6 @@ void sim800::update_esp()
 		if(stat > 200)
 			return;
 	}
-	// else if(stat == 37 || stat == 200)
 	else
 	{
 		char* buffer = (char*)malloc(16);
@@ -838,11 +848,9 @@ void sim800::update_esp()
 			Serial.print("UPDATE HTTP read = ");Serial.print(buffer);Serial.print("; received length = ");Serial.println(result_read);
 			if(result_read > 0)
 			{
-				// url = String(WEB_URL_API) + "/upgrade/" + String(buffer);
-				url = String("http://test.ru/") + String(buffer);
+				url = String(WEB_URL_API) + "/upgrade/" + String(buffer);
 				Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quite for a while.. Patience!");
 				unsigned short int status = HTTP_get(url.c_str(), &len);
-				// if (len > 0)
 				if(status < 201)
 				{
 					esp_err_t err;

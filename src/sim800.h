@@ -2,12 +2,12 @@
 #define SIM800_H
 
 /*debug AT i/o (very verbose)*/
-// #define DEBUG_AT
-// #define DEBUG_URC
+#define DEBUG_AT
+#define DEBUG_URC
 /*debug receiving and sending of packets (sizes)*/
-// #define DEBUG_PACKETS
+#define DEBUG_PACKETS
 /*debugging of send/receive progress (not very verbose)*/
-// #define DEBUG_PROGRESS
+#define DEBUG_PROGRESS
 
 #define OTA_BUFFSIZE 1024
 #define TEXT_BUFFSIZE 1024
@@ -73,6 +73,7 @@ public:
 	bool disableGPRS();
 	bool time(char *date, char *time, char *tz);
 	bool IMEI(char *imei);
+	bool CIMI(char *cimi);//ID sim card
 	bool battery(uint16_t &bat_status, uint16_t &bat_percent, uint16_t &bat_voltage);
 	bool location(char *&lat, char *&lon, char *&date, char *&time);
 	bool status();
@@ -88,12 +89,9 @@ public:
 	* result code
 	*/
 
-	// unsigned short int HTTP_get(const char *url, unsigned long int &length);
 	unsigned short int HTTP_get(const char *url, unsigned long int *length);
 
-	// unsigned short int HTTP_get(const char *url, unsigned long int &length, STREAM &file);
 	unsigned short int HTTP_get(const char *url, unsigned long int *length, STREAM &file);
-	// unsigned short int HTTP_get(const char *url, unsigned long int *length, UpdateClass &update, size_t* length_written);
 
 	size_t HTTP_read(char *buffer, uint32_t start, size_t length);
 	size_t HTTP_read_ota(esp_ota_handle_t ota_handle, uint32_t start, size_t length);
@@ -126,9 +124,9 @@ public:
 	void set_operator();
 
 #ifdef __AVR__
-    SoftwareSerial _serial = SoftwareSerial(SIM800_TX, SIM800_RX);
+	SoftwareSerial _serial = SoftwareSerial(SIM800_TX, SIM800_RX);
 #else
-    HardwareSerial _serial = HardwareSerial(1);
+	HardwareSerial _serial = HardwareSerial(1);
 #endif
 
 protected:
