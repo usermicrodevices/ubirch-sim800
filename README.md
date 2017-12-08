@@ -1,6 +1,6 @@
-# ubirch-sim800
+# sim800
 
-C++ library to drive the SIM800 chip.
+C++ library to drive the SIM800 chip and ESP32.
 
 I wrote this code to make sure we can send and retrieve data using the chip
 with minimal RAM and Flash impact. Additionally this class contains code to
@@ -15,11 +15,11 @@ by connecting a serial console to your board.
 
 ## Works with ...
 
-- Arduino compatible boards (AVR, ARM)
-- Teensy-LC, Teensy 3.1/3.2
+- ESP32
 
 ## LICENSE
 
+    Copyright 2017 http://micrometrica.ru
     Copyright 2015 ubirch GmbH (http://www.ubirch.com)
 
     Licensed under the Apache License, Version 2.0 (the "License");
