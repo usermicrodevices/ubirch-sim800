@@ -1,13 +1,14 @@
 #ifndef SIM800_H
 #define SIM800_H
 
+// #define DEBUG_SIM800
 /*debug AT i/o (very verbose)*/
-#define DEBUG_AT
-#define DEBUG_URC
+// #define DEBUG_AT
+// #define DEBUG_URC
 /*debug receiving and sending of packets (sizes)*/
-#define DEBUG_PACKETS
+// #define DEBUG_PACKETS
 /*debugging of send/receive progress (not very verbose)*/
-#define DEBUG_PROGRESS
+// #define DEBUG_PROGRESS
 
 #define OTA_BUFFSIZE 1024
 #define TEXT_BUFFSIZE 1024
@@ -28,17 +29,6 @@
 
 #define STREAM Stream
 
-#ifdef __AVR__
-#include <SoftwareSerial.h>
-// this is the maximum I could do using the board-mounted SIM800 on the ubirch #1
-// if you are using an externally wired Modem, you may have to try a lower baud rate
-#define SIM800_BAUD 57600
-#define SIM800_RX   2
-#define SIM800_TX   3
-#define SIM800_RST  4
-#define SIM800_KEY  7
-#define SIM800_PS   8
-#else
 #define SIM800_BAUD 115200
 #define SIM800_RX   16
 #define SIM800_TX   17
@@ -50,22 +40,20 @@
 #define F(s) (s)
 #endif
 #define __FlashStringHelper char
-#endif
 
-// static int binary_file_length = 0;
-// static char ota_write_data[OTA_BUFFSIZE + 1] = { 0 };
-// static char ota_text[OTA_BUFFSIZE + 1] = { 0 };
-
-class sim800 {
-
+class sim800
+{
 public:
+	// int gsm_signal = 0;
+	int gsm_rssi = 0;
+	int gsm_ber = 0;
 	uint8_t urc_status = 0xff;
 
 	sim800();
 	void begin();
 	void setAPN(const __FlashStringHelper *apn, const __FlashStringHelper *user, const __FlashStringHelper *pass);
 	bool unlock(const __FlashStringHelper *pin);
-	bool reset();
+	bool reset(bool flag_reboot = false);
 	bool shutdown();
 	bool wakeup();
 	bool registerNetwork(uint16_t timeout = SIM800_CMD_TIMEOUT);
@@ -90,9 +78,7 @@ public:
 	*/
 
 	unsigned short int HTTP_get(const char *url, unsigned long int *length);
-
 	unsigned short int HTTP_get(const char *url, unsigned long int *length, STREAM &file);
-
 	size_t HTTP_read(char *buffer, uint32_t start, size_t length);
 	size_t HTTP_read_ota(esp_ota_handle_t ota_handle, uint32_t start, size_t length);
 	unsigned short int HTTP_post(const char *url, unsigned long int *length);
@@ -105,29 +91,21 @@ public:
 	bool expect_scan(const __FlashStringHelper *pattern, void *ref, uint16_t timeout = SIM800_SERIAL_TIMEOUT);
 	bool expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, uint16_t timeout = SIM800_SERIAL_TIMEOUT);
 	bool expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, void *ref2, uint16_t timeout = SIM800_SERIAL_TIMEOUT);
+	bool expect_scan(const __FlashStringHelper *pattern, void *ref, void *ref1, void *ref2, void *ref3, uint16_t timeout = SIM800_SERIAL_TIMEOUT);
 	size_t read(char *buffer, size_t length);
 	inline size_t read_ota(esp_ota_handle_t ota_handle, size_t length);
 	size_t readline(char *buffer, size_t max, uint16_t timeout);
 	void print(const char *s);
 	void print(uint32_t s);
 	void println(const char *s);
-
-#ifdef __AVR__
-	void print(const __FlashStringHelper *s);
-	void println(const __FlashStringHelper *s);
-#endif
-
 	void println(uint32_t s);
 	bool check_sim_card();
-	int get_signal();
-	void update_esp();
+	int get_signal(int& ber);
+	bool gsm_init();
+	void update_esp(String url_update);
 	void set_operator();
 
-#ifdef __AVR__
-	SoftwareSerial _serial = SoftwareSerial(SIM800_TX, SIM800_RX);
-#else
 	HardwareSerial _serial = HardwareSerial(1);
-#endif
 
 protected:
 	const uint32_t _serialSpeed = SIM800_BAUD;
@@ -142,11 +120,9 @@ protected:
 	const char* users[4] = {"beeline", "mts", "gdata", NULL};
 	const char* pwds[4] = {"beeline", "mts", "gdata", NULL};
 	int current_operator = 0;
-	int gsm_signal = 0;
 };
 
 // this useful list found here: https://github.com/cloudyourcar/attentive
-
 /* incoming socket data notification */
 const char * const urc_01 PROGMEM = "+CIPRXGET: 1,";
 /* FTP state change notification */
@@ -176,9 +152,6 @@ const char * const urc_16 PROGMEM = "UNDER-VOLTAGE WARNNING";
 const char * const urc_17 PROGMEM = "OVER-VOLTAGE POWER DOWN";
 const char * const urc_18 PROGMEM = "OVER-VOLTAGE WARNNING";
 
-const char * const _urc_messages[] PROGMEM = {
-        urc_01, urc_02, urc_03, urc_04, urc_06, urc_07, urc_08, urc_09, urc_10,
-        urc_11, urc_12, urc_13, urc_14, urc_15, urc_16, urc_17, urc_18
-};
+const char * const _urc_messages[] PROGMEM = {urc_01, urc_02, urc_03, urc_04, urc_06, urc_07, urc_08, urc_09, urc_10, urc_11, urc_12, urc_13, urc_14, urc_15, urc_16, urc_17, urc_18};
 
-#endif //UBIRCH_SIM800_H
+#endif //SIM800_H
