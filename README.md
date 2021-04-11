@@ -19,7 +19,7 @@ by connecting a serial console to your board.
 
 ## LICENSE
 
-    Copyright 2017 http://micrometrica.ru
+    Copyright 2017 https://www.espressif.com/
     Copyright 2015 ubirch GmbH (http://www.ubirch.com)
 
     Licensed under the Apache License, Version 2.0 (the "License");
